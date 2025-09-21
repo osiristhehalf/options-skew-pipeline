@@ -1,0 +1,83 @@
+from ib_insync import *
+import numpy as np
+
+ib = IB()
+ib.connect('127.0.0.1', 4001, clientId=1)
+
+# Top 150 US tickers by market cap (snapshot from 2025)
+tickers = [
+    'NVDA','MSFT','AAPL','GOOG','AMZN','META','AVGO','TSLA','JPM',
+    'ORCL','WMT','LLY','V','MA','NFLX','XOM','COST','PLTR','JNJ',
+    'HD','ABBV','BAC','PG','CVX','GE','UNH','KO','CSCO','TMUS',
+    'WFC','AMD','MS','PM','IBM','GS','AXP','ABT','CRM','BX',
+    'CAT','MCD','RTX','APP','T','DIS','MRK','UBER','NOW','INTC',
+    'ADBE','QCOM','ISRG','AMAT','DE','CI','MDLZ','LMT','ADI','SYK',
+    'REGN','PGR','ZTS','MO','GM','FDX','BKNG','ETSY','HUM',
+    'SPGI','CB','KLAC','VRTX','CSX','F','ROST','MAR','MNST','FTNT',
+    'EA','ILMN','TT','CDNS','CTAS','DHI','EXC','WBD','BKR','AON',
+    'SBUX','DDOG','DLR','EBAY','VLO','STZ','MTCH','PAYC','RMD','ALGN',
+    'TYL','CHD','CARR','OTIS','NUE','MLM','LEN','VRSK','AVTR','ENPH',
+    'KEYS','TER','AKAM','NTAP','PTC','BIO','MKTX','TECH','FSLR',
+    'CF','CC','HPE','QRVO','SWKS','FFIV','NDSN','MAS','J','IEX','AOS',
+    'ZBRA','BALL','PKG','WRB','TY','CINF','HII','WAT','NVR'
+]
+
+
+
+def get_skew_signals(ticker):
+    stock = Stock(ticker, 'SMART', 'USD')
+    try:
+        ib.qualifyContracts(stock)
+    except:
+        return None
+
+    params = ib.reqSecDefOptParams(stock.symbol, '', stock.secType, stock.conId)
+    chain = next((c for c in params if c.tradingClass == ticker and c.exchange == 'SMART'), None)
+    if not chain or not chain.strikes or not chain.expirations:
+        return None
+
+    expiry = sorted(chain.expirations)[0]
+    strikes = sorted([s for s in chain.strikes if s > 0])
+    data = ib.reqMktData(stock, snapshot=True)
+    ib.sleep(1)
+    atm = data.marketPrice if data.marketPrice else np.median(strikes)
+
+    near_strikes = [s for s in strikes if 0.9 * atm < s < 1.1 * atm][:5]
+    far_otm_calls = [s for s in strikes if s > 1.2 * atm][-5:]
+
+    vols = {}
+    for strike in near_strikes + far_otm_calls:
+        opt = Option(ticker, expiry, strike, 'C', 'SMART')
+        try:
+            ib.qualifyContracts(opt)
+            data = ib.reqMktData(opt, snapshot=True)
+            ib.sleep(0.5)
+            vols[strike] = data.impliedVol
+        except:
+            continue
+
+    near_vols = [vols[s] for s in near_strikes if s in vols and vols[s] is not None]
+    far_vols = [vols[s] for s in far_otm_calls if s in vols and vols[s] is not None]
+
+    if len(near_vols) < 3 or len(far_vols) < 3:
+        return None
+
+    skew = np.mean(far_vols) - np.mean(near_vols)
+    convexity = np.std(far_vols) / np.mean(far_vols)
+
+    return {
+        'vol_skew': round(skew, 4),
+        'convexity': round(convexity, 4),
+        'signal': 'oversized_call' if skew > 0.1 and convexity > 0.3 else 'neutral'
+    }
+
+# ---------- EXECUTION ----------
+signals = {}
+
+for ticker in tickers:
+    try:
+        signals[ticker] = get_skew_signals(ticker)
+    except:
+        signals[ticker] = None
+
+print(signals)
