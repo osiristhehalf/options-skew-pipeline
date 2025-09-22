@@ -1,9 +1,5 @@
-# streamlit_app.py
 import streamlit as st
 import pandas as pd
-import sys
-import os
-sys.path.append(os.path.dirname(__file__))
 
 from signal_engine import get_skew_signals, tickers
 
@@ -24,4 +20,3 @@ st.dataframe(df)
 if st.button("Export to CSV"):
     df.to_csv("skew_signals.csv", index=False)
     st.success("Exported skew_signals.csv")
-    
