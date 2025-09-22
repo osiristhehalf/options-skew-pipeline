@@ -1,6 +1,10 @@
 # streamlit_app.py
 import streamlit as st
 import pandas as pd
+import sys
+import os
+sys.path.append(os.path.dirname(__file__))
+
 from signal_engine import get_skew_signals, tickers
 
 st.title("Options Skew Signal Dashboard")
